@@ -23,8 +23,8 @@ ROOT = Path(__file__).parent
 ASSETS = ROOT / "assets"
 AGE_CATEGORIES = ["Under 5", "5–7", "8–10", "11–13", "14–16", "17+"]
 SITES = [
-    "BBO", "BTO", "BKN", "EME", "MTR", "HRN 1", "HRN 2", "MDP",
-    "ORK", "DPV", "Other"
+    "BBO", "BTO", "BKN", "DPV","EME", "GNT","HRN 1", "HRN 2","LKM","MDP", "MGT","MTR","MVB",
+    "ORK","RDP", "UDW", "VBL","WMB"
 ]
 STAFF_EMAIL_DOMAINS = [
     d.strip().lower().lstrip("@")
