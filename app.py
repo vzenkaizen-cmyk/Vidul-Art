@@ -90,7 +90,8 @@ def init_db(engine):
             father_name VARCHAR(255),
             age_category VARCHAR(50),
             site VARCHAR(100),
-            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            must_change_password BOOLEAN NOT NULL DEFAULT FALSE
         )
         """))
         # Migrate databases created by older versions of the app. CREATE TABLE IF NOT
@@ -104,6 +105,7 @@ def init_db(engine):
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username_migrated ON users (username) WHERE username IS NOT NULL"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_migrated ON users (email) WHERE email IS NOT NULL"))
         conn.execute(text("""
@@ -140,6 +142,12 @@ def init_db(engine):
             UNIQUE(age_category, place),
             UNIQUE(age_category, student_id)
         )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                setting_key VARCHAR(100) PRIMARY KEY,
+                setting_value TEXT NOT NULL
+            )
         """))
 
 def query_all(sql, params=None):
@@ -238,6 +246,53 @@ def create_staff(role, email, password, name=None, site=None):
         "full_name": (name or "").strip() or None, "site": site
     })
 
+DEFAULT_ADMIN_ACCOUNTS = {
+    "jananil@vidullanka.com": "Jananil",
+    "sameerar@vidullanka.com": "Sameera R",
+    "anjalin@vidullanka.com": "Anjalin",
+    "samodas@vidullanka.com": "Samoda",
+}
+DEFAULT_ADMIN_PASSWORD = "admin@123"
+
+def ensure_default_admin_accounts():
+    """Initialize the four designated admin accounts once, without resetting later password changes."""
+    initialized = query_one(
+        "SELECT setting_value FROM app_settings WHERE setting_key='default_admin_accounts_initialized'"
+    )
+    if initialized:
+        return
+
+    for email, name in DEFAULT_ADMIN_ACCOUNTS.items():
+        existing = query_one(
+            "SELECT id FROM users WHERE lower(email)=:email LIMIT 1",
+            {"email": email}
+        )
+        if existing is None:
+            create_staff("admin", email, DEFAULT_ADMIN_PASSWORD, name)
+            execute("""
+                UPDATE users SET must_change_password=TRUE
+                WHERE lower(email)=:email
+            """, {"email": email})
+        else:
+            execute("""
+                UPDATE users
+                SET role='admin', username=:email, site=NULL,
+                    password_hash=:password_hash, full_name=COALESCE(full_name, :name),
+                    must_change_password=TRUE
+                WHERE id=:id
+            """, {
+                "email": email,
+                "password_hash": hash_password(DEFAULT_ADMIN_PASSWORD),
+                "name": name,
+                "id": existing["id"]
+            })
+
+    execute("""
+        INSERT INTO app_settings (setting_key, setting_value)
+        VALUES ('default_admin_accounts_initialized', 'true')
+        ON CONFLICT (setting_key) DO NOTHING
+    """)
+
 def generate_student_code():
     """Generate a short, easy-to-read access code for a student."""
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -269,6 +324,13 @@ def authenticate(identifier, password_or_code):
     if row and verify_password(password_or_code, row["password_hash"]):
         return dict(row)
     return None
+
+# Ensure the designated administrator accounts exist after database helpers are defined.
+try:
+    ensure_default_admin_accounts()
+except Exception as e:
+    st.error(f"Could not initialize designated admin accounts: {e}")
+    st.stop()
 
 def average_marks(artwork_id):
     row = query_one("SELECT AVG(marks) AS avg_marks FROM artwork_marks WHERE artwork_id=:id", {"id": artwork_id})
@@ -333,9 +395,9 @@ if not user:
         st.write("")
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown('<div class="panel feature-card"><h3>🖌️ Student artists</h3><p>Register with your site and age category, then submit your artwork through your site supervisor.</p></div>', unsafe_allow_html=True)
+            st.markdown('<div class="panel feature-card"><h3>🖌️ Student artists</h3><p>Register with your site and age category, then have your artwork uploaded by an administrator.</p></div>', unsafe_allow_html=True)
         with c2:
-            st.markdown('<div class="panel feature-card"><h3>📍 Site supervisors</h3><p>Access only your assigned site and upload student artwork as PDF files.</p></div>', unsafe_allow_html=True)
+            st.markdown('<div class="panel feature-card"><h3>🛡️ Administrators</h3><p>Manage student artwork submissions across all competition sites.</p></div>', unsafe_allow_html=True)
         with c3:
             st.markdown('<div class="panel feature-card"><h3>🏆 Teachers</h3><p>Review entries from all sites, mark each artwork and publish three winners per age category.</p></div>', unsafe_allow_html=True)
 
@@ -358,11 +420,11 @@ if not user:
                     else:
                         st.error("Invalid username/email or password.")
         with col2:
-            st.markdown('<div class="panel"><h3>One platform, four roles</h3><p>Students · Site supervisors · Teachers · Admin</p><p class="small-muted">Staff accounts must use an authorized Vidullanka email address. Supervisors are restricted to their assigned site.</p></div>', unsafe_allow_html=True)
+            st.markdown('<div class="panel"><h3>One platform, four roles</h3><p>Students · Teachers · Admin</p><p class="small-muted">Staff accounts must use an authorized Vidullanka email address. Administrators can upload artwork for students across all sites.</p></div>', unsafe_allow_html=True)
 
     elif st.session_state.page == "Create account":
         st.markdown('<div class="panel"><h2>Create your account</h2><p class="small-muted">Choose the account type that matches your role.</p></div>', unsafe_allow_html=True)
-        role_tab_student, role_tab_supervisor, role_tab_teacher, role_tab_admin = st.tabs(["🎨 Student", "📍 Site supervisor", "👩‍🏫 Teacher", "🛡️ Admin"])
+        role_tab_student, role_tab_teacher = st.tabs(["🎨 Student", "👩‍🏫 Teacher"])
         with role_tab_student:
             with st.form("student_register"):
                 name = st.text_input("Student's full name")
@@ -384,30 +446,6 @@ if not user:
                             st.error("That username is already taken. Please choose another.")
                         except Exception as e:
                             st.error(f"Could not create account: {e}")
-        with role_tab_supervisor:
-            st.info("A site supervisor can view student records and upload PDFs only for the site assigned to their account.")
-            with st.form("supervisor_register"):
-                name = st.text_input("Supervisor's name")
-                email = st.text_input("Vidullanka email", key="sup_email")
-                site = st.selectbox("Assigned site (you can access only this site)", SITES, key="sup_site")
-                pw = st.text_input("Create password", type="password", key="sup_pw")
-                pw2 = st.text_input("Confirm password", type="password", key="sup_pw2")
-                ok = st.form_submit_button("Create supervisor account", type="primary", use_container_width=True)
-                if ok:
-                    if not email.strip() or not pw or not name.strip():
-                        st.error("Complete all fields.")
-                    elif len(pw) < 8:
-                        st.error("Password must be at least 8 characters.")
-                    elif pw != pw2:
-                        st.error("Passwords do not match.")
-                    else:
-                        try:
-                            create_staff("supervisor", email, pw, name, site)
-                            st.success("Supervisor account created. Sign in using your Vidullanka email.")
-                        except IntegrityError:
-                            st.error("An account already exists for this email.")
-                        except ValueError as e:
-                            st.error(str(e))
         with role_tab_teacher:
             with st.form("teacher_register"):
                 name = st.text_input("Teacher's name")
@@ -430,29 +468,6 @@ if not user:
                             st.error("An account already exists for this email.")
                         except ValueError as e:
                             st.error(str(e))
-        with role_tab_admin:
-            st.warning("Admin accounts have platform-wide access. Only authorized Vidullanka staff should create one.")
-            with st.form("admin_register"):
-                name = st.text_input("Admin's name")
-                email = st.text_input("Vidullanka email", key="admin_email")
-                pw = st.text_input("Create password", type="password", key="admin_pw")
-                pw2 = st.text_input("Confirm password", type="password", key="admin_pw2")
-                ok = st.form_submit_button("Create admin account", type="primary", use_container_width=True)
-                if ok:
-                    if not email.strip() or not pw or not name.strip():
-                        st.error("Complete all fields.")
-                    elif len(pw) < 8:
-                        st.error("Password must be at least 8 characters.")
-                    elif pw != pw2:
-                        st.error("Passwords do not match.")
-                    else:
-                        try:
-                            create_staff("admin", email, pw, name)
-                            st.success("Admin account created. Sign in using your Vidullanka email.")
-                        except IntegrityError:
-                            st.error("An account already exists for this email.")
-                        except ValueError as e:
-                            st.error(str(e))
     elif st.session_state.page == "Winners":
         st.title("🏆 Competition winners")
         show_winners()
@@ -461,18 +476,53 @@ else:
     role = user["role"]
     st.title(f"Hello, {user.get('full_name') or user.get('username') or user.get('email')} 👋")
     st.caption(f"{role.title()} dashboard")
+
+    if role == "admin":
+        st.subheader("🔐 Change administrator password")
+        if user.get("must_change_password"):
+            st.warning("For security, change the temporary password before continuing.")
+        with st.form("admin_password_change"):
+            current_pw = st.text_input("Current password", type="password")
+            new_pw = st.text_input("New password", type="password")
+            confirm_pw = st.text_input("Confirm new password", type="password")
+            change_pw = st.form_submit_button("Update password", type="primary")
+            if change_pw:
+                if not verify_password(current_pw, user["password_hash"]):
+                    st.error("Current password is incorrect.")
+                elif len(new_pw) < 8:
+                    st.error("New password must be at least 8 characters.")
+                elif new_pw != confirm_pw:
+                    st.error("New passwords do not match.")
+                else:
+                    execute(
+                        "UPDATE users SET password_hash=:password_hash, must_change_password=FALSE WHERE id=:id",
+                        {"password_hash": hash_password(new_pw), "id": user["id"]}
+                    )
+                    st.session_state.user = query_one(
+                        "SELECT * FROM users WHERE id=:id", {"id": user["id"]}
+                    )
+                    st.success("Password updated successfully.")
+                    st.rerun()
+        if user.get("must_change_password"):
+            st.info("The admin dashboard will be available after you change your password.")
+            st.stop()
+
     if role == "student":
         st.markdown('<div class="panel"><h3>Your competition profile</h3></div>', unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
         c1.metric("Age category", user.get("age_category") or "—")
         c2.metric("Site", user.get("site") or "—")
         c3.metric("Artwork status", "Submitted" if query_one("SELECT id FROM artworks WHERE student_id=:id", {"id": user["id"]}) else "Not submitted")
-        st.info("Your site supervisor uploads your artwork PDF. Contact your supervisor if you need to correct your details.")
+        st.info("An administrator uploads your artwork PDF. Contact the competition administrator if you need to correct your details.")
         st.subheader("Published winners")
         show_winners()
 
     elif role == "supervisor":
-        st.markdown(f'<div class="panel"><h3>📍 Assigned site: {user.get("site")}</h3><p>You can only access students registered under this site.</p></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="panel"><h3>📍 Assigned site: {user.get("site")}</h3>'
+            '<p>You can view student records for your assigned site only. Artwork uploads are handled by administrators.</p></div>',
+            unsafe_allow_html=True
+        )
         students = query_all("""
           SELECT u.id, u.full_name, u.father_name, u.age_category, u.site,
                  a.id AS artwork_id, a.file_name, a.uploaded_at
@@ -483,39 +533,23 @@ else:
         if not students:
             st.info("No students have registered for your site yet.")
         else:
-            for s in students:
-                with st.expander(f"{s['full_name']} · {s['age_category']} · {'PDF uploaded' if s['artwork_id'] else 'Awaiting artwork'}"):
-                    st.write(f"**Father's name:** {s['father_name']}")
-                    st.write(f"**Site:** {s['site']}")
-                    if s["artwork_id"]:
-                        art = query_one("SELECT file_name, pdf_data FROM artworks WHERE id=:id", {"id": s["artwork_id"]})
-                        st.download_button("Download current artwork PDF", data=bytes(art["pdf_data"]), file_name=art["file_name"], mime="application/pdf", key=f"download_{s['id']}")
-                    with st.form(f"upload_{s['id']}"):
-                        uploaded = st.file_uploader("Upload student's artwork (PDF only)", type=["pdf"], key=f"pdf_{s['id']}")
-                        submit = st.form_submit_button("Upload / replace artwork", type="primary")
-                        if submit:
-                            if not uploaded:
-                                st.error("Choose a PDF file first.")
-                            elif not uploaded.getvalue().startswith(b"%PDF"):
-                                st.error("The uploaded file does not appear to be a valid PDF.")
-                            elif len(uploaded.getvalue()) > 15 * 1024 * 1024:
-                                st.error("PDF must be 15 MB or smaller.")
-                            else:
-                                try:
-                                    execute("""
-                                      INSERT INTO artworks (student_id, uploaded_by, file_name, mime_type, pdf_data)
-                                      VALUES (:student_id, :uploaded_by, :file_name, 'application/pdf', :pdf_data)
-                                      ON CONFLICT (student_id) DO UPDATE SET
-                                        uploaded_by=EXCLUDED.uploaded_by,
-                                        file_name=EXCLUDED.file_name,
-                                        mime_type=EXCLUDED.mime_type,
-                                        pdf_data=EXCLUDED.pdf_data,
-                                        uploaded_at=CURRENT_TIMESTAMP
-                                    """, {"student_id": s["id"], "uploaded_by": user["id"], "file_name": uploaded.name, "pdf_data": uploaded.getvalue()})
-                                    st.success("Artwork uploaded.")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Upload failed: {e}")
+            for student in students:
+                with st.expander(
+                    f"{student['full_name']} · {student['age_category']} · "
+                    f"{'PDF uploaded' if student['artwork_id'] else 'Awaiting artwork'}"
+                ):
+                    st.write(f"**Father's name:** {student['father_name']}")
+                    st.write(f"**Site:** {student['site']}")
+                    if student["artwork_id"]:
+                        art = query_one(
+                            "SELECT file_name, pdf_data FROM artworks WHERE id=:id",
+                            {"id": student["artwork_id"]}
+                        )
+                        st.download_button(
+                            "Download artwork PDF", data=bytes(art["pdf_data"]),
+                            file_name=art["file_name"], mime="application/pdf",
+                            key=f"supervisor_download_{student['id']}"
+                        )
 
     elif role == "teacher":
         st.markdown('<div class="panel"><h3>👩‍🏫 Review artwork from all sites</h3><p>Open an age category, review each submitted PDF, award marks out of 100 and add feedback.</p></div>', unsafe_allow_html=True)
@@ -597,7 +631,80 @@ else:
         show_winners()
 
     elif role == "admin":
-        st.markdown('<div class="panel"><h3>🛡️ Administration</h3><p>View account totals and manage competition access.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="panel"><h3>🛡️ Administration</h3><p>Manage student artwork uploads across all competition sites and oversee platform access.</p></div>', unsafe_allow_html=True)
+
+        st.subheader("📤 Upload student artwork")
+        upload_site = st.selectbox("Select student site", SITES, key="admin_upload_site")
+        site_students = query_all("""
+            SELECT id, full_name, father_name, age_category, site
+            FROM users
+            WHERE role='student' AND site=:site
+            ORDER BY age_category, full_name
+        """, {"site": upload_site})
+        if not site_students:
+            st.info("No students are registered under this site yet.")
+        else:
+            student_options = {
+                f"{x['full_name']} · {x['age_category']} · {x['site']}": x["id"]
+                for x in site_students
+            }
+            selected_student_label = st.selectbox(
+                "Select student", list(student_options.keys()), key="admin_upload_student"
+            )
+            selected_student_id = student_options[selected_student_label]
+            current_artwork = query_one(
+                "SELECT id, file_name, pdf_data FROM artworks WHERE student_id=:id",
+                {"id": selected_student_id}
+            )
+            if current_artwork:
+                st.caption(f"Current artwork: {current_artwork['file_name']}")
+                st.download_button(
+                    "Download current artwork PDF",
+                    data=bytes(current_artwork["pdf_data"]),
+                    file_name=current_artwork["file_name"],
+                    mime="application/pdf",
+                    key=f"admin_current_artwork_{selected_student_id}"
+                )
+            with st.form(f"admin_upload_form_{selected_student_id}"):
+                uploaded = st.file_uploader(
+                    "Upload student's artwork (PDF only)",
+                    type=["pdf"], key=f"admin_pdf_{selected_student_id}"
+                )
+                submit_upload = st.form_submit_button(
+                    "Upload / replace artwork", type="primary"
+                )
+                if submit_upload:
+                    if not uploaded:
+                        st.error("Choose a PDF file first.")
+                    elif not uploaded.getvalue().startswith(b"%PDF"):
+                        st.error("The uploaded file does not appear to be a valid PDF.")
+                    elif len(uploaded.getvalue()) > 15 * 1024 * 1024:
+                        st.error("PDF must be 15 MB or smaller.")
+                    else:
+                        try:
+                            execute("""
+                                INSERT INTO artworks
+                                    (student_id, uploaded_by, file_name, mime_type, pdf_data)
+                                VALUES
+                                    (:student_id, :uploaded_by, :file_name, 'application/pdf', :pdf_data)
+                                ON CONFLICT (student_id) DO UPDATE SET
+                                    uploaded_by=EXCLUDED.uploaded_by,
+                                    file_name=EXCLUDED.file_name,
+                                    mime_type=EXCLUDED.mime_type,
+                                    pdf_data=EXCLUDED.pdf_data,
+                                    uploaded_at=CURRENT_TIMESTAMP
+                            """, {
+                                "student_id": selected_student_id,
+                                "uploaded_by": user["id"],
+                                "file_name": uploaded.name,
+                                "pdf_data": uploaded.getvalue()
+                            })
+                            st.success("Student artwork uploaded successfully.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Upload failed: {e}")
+
+        st.divider()
         stats = query_all("SELECT role, COUNT(*) AS total FROM users GROUP BY role ORDER BY role")
         cols = st.columns(4)
         totals = {x["role"]: x["total"] for x in stats}
