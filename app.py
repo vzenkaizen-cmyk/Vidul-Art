@@ -238,23 +238,35 @@ def create_staff(role, email, password, name=None, site=None):
         "full_name": (name or "").strip() or None, "site": site
     })
 
-def create_student(name, father, age, site, username, password):
+def generate_student_code():
+    """Generate a short, easy-to-read access code for a student."""
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "STU-" + "".join(secrets.choice(alphabet) for _ in range(8))
+
+
+def create_student(name, father, age, site, username):
+    # The generated code is hashed before being stored in the existing
+    # password_hash column. No student password is requested.
+    student_code = generate_student_code()
     execute("""
       INSERT INTO users (role, username, password_hash, full_name, father_name, age_category, site)
       VALUES ('student', :username, :password_hash, :name, :father, :age, :site)
     """, {
-        "username": username.strip(), "password_hash": hash_password(password),
+        "username": username.strip(),
+        "password_hash": hash_password(student_code),
         "name": name.strip(), "father": father.strip(), "age": age, "site": site
     })
+    return student_code
 
-def authenticate(identifier, password):
+
+def authenticate(identifier, password_or_code):
     row = query_one("""
       SELECT * FROM users
       WHERE lower(coalesce(username,'')) = lower(:identifier)
          OR lower(coalesce(email,'')) = lower(:identifier)
       LIMIT 1
     """, {"identifier": identifier.strip()})
-    if row and verify_password(password, row["password_hash"]):
+    if row and verify_password(password_or_code, row["password_hash"]):
         return dict(row)
     return None
 
@@ -334,7 +346,8 @@ if not user:
         with col1:
             with st.form("signin_form"):
                 identifier = st.text_input("Username or Vidullanka email")
-                password = st.text_input("Password", type="password")
+                password = st.text_input("Password / Student code", type="password")
+                st.caption("Students: enter your generated student code. Staff: enter your account password.")
                 submit = st.form_submit_button("Sign in", type="primary", use_container_width=True)
                 if submit:
                     found = authenticate(identifier, password)
@@ -357,20 +370,16 @@ if not user:
                 age = st.selectbox("Age category", AGE_CATEGORIES)
                 site = st.selectbox("Site", SITES)
                 username = st.text_input("Create username")
-                pw = st.text_input("Create password", type="password")
-                pw2 = st.text_input("Confirm password", type="password")
                 ok = st.form_submit_button("Create student account", type="primary", use_container_width=True)
                 if ok:
-                    if not all([name.strip(), father.strip(), username.strip(), pw]):
+                    if not all([name.strip(), father.strip(), username.strip()]):
                         st.error("Complete all fields.")
-                    elif len(pw) < 8:
-                        st.error("Password must be at least 8 characters.")
-                    elif pw != pw2:
-                        st.error("Passwords do not match.")
                     else:
                         try:
-                            create_student(name, father, age, site, username, pw)
-                            st.success("Student account created. You can now sign in.")
+                            student_code = create_student(name, father, age, site, username)
+                            st.success("Student account created successfully.")
+                            st.info("Keep this student code safe. You will need it to sign in.")
+                            st.code(student_code)
                         except IntegrityError:
                             st.error("That username is already taken. Please choose another.")
                         except Exception as e:
