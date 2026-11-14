@@ -23,7 +23,7 @@ ROOT = Path(__file__).parent
 ASSETS = ROOT / "assets"
 AGE_CATEGORIES = ["Under 5", "5–7", "8–10", "11–13", "14–16", "17+"]
 SITES = [
-    "BBO", "BTO", "BKN", "DPV","EME", "GNT","HRN 1", "HRN 2","LKM","MDP", "MGT","MTR","MVB",
+    "BBO", "BTO", "BKN", "DPV","EME", "GNT","HRN 1", "HRN 2", "HOF","LKM","MDP", "MGT","MTR","MVB",
     "ORK","RDP", "UDW", "VBL","WMB"
 ]
 
@@ -395,7 +395,7 @@ if not user:
         st.markdown("""
         <div class="hero">
           <span class="pill">✨ Creativity from every site</span>
-          <h1>Art Competition<br>2026</h1>
+          <h1>Art Competition</h1>
           <p>Celebrating young artists, imagination and the stories behind every artwork. Explore the competition, sign in, or create an account to take part.</p>
         </div>
         """, unsafe_allow_html=True)
@@ -494,7 +494,7 @@ else:
         c1.metric("Age category", user.get("age_category") or "—")
         c2.metric("Site", user.get("site") or "—")
         c3.metric("Artwork status", "Submitted" if query_one("SELECT id FROM artworks WHERE student_id=:id", {"id": user["id"]}) else "Not submitted")
-        st.info("Your site supervisor uploads your artwork PDF. Contact your supervisor if you need to correct your details.")
+
         st.subheader("Published winners")
         show_winners()
 
