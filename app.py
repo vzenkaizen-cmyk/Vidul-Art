@@ -301,16 +301,15 @@ def create_staff(role, email, password, name=None, site=None):
         "full_name": (name or "").strip() or None, "site": site
     })
 
-def generate_student_code():
-    """Generate a short, easy-to-read access code for a student."""
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    return "STU-" + "".join(secrets.choice(alphabet) for _ in range(8))
+def generate_student_code(site: str):
+    """Use the student's registered site as their access code."""
+    return site.strip()
 
 
 def create_student(name, father, age, site, username):
     # The generated code is hashed before being stored in the existing
     # password_hash column. No student password is requested.
-    student_code = generate_student_code()
+    student_code = generate_student_code(site)
     execute("""
       INSERT INTO users (role, username, password_hash, full_name, father_name, age_category, site)
       VALUES ('student', :username, :password_hash, :name, :father, :age, :site)
@@ -329,8 +328,15 @@ def authenticate(identifier, password_or_code):
          OR lower(coalesce(email,'')) = lower(:identifier)
       LIMIT 1
     """, {"identifier": identifier.strip()})
-    if row and verify_password(password_or_code, row["password_hash"]):
-        return dict(row)
+    if row:
+        # Students use their registered site as the access code. This also
+        # supports existing student accounts created with the previous code.
+        if row["role"] == "student":
+            site_code = (row.get("site") or "").strip()
+            if password_or_code.strip().casefold() == site_code.casefold():
+                return dict(row)
+        elif verify_password(password_or_code, row["password_hash"]):
+            return dict(row)
     return None
 
 def average_marks(artwork_id):
