@@ -396,13 +396,13 @@ if not user:
         <div class="hero">
           <span class="pill">✨ Creativity from every site</span>
           <h1>Art Competition</h1>
-          <p>Celebrating young artists, imagination and the stories behind every artwork. Explore the competition, sign in, or create an account to take part.</p>
+          <p>Celebrating young artists, imagination and the stories behind every artwork. Administrators record student details and upload artworks on their behalf.</p>
         </div>
         """, unsafe_allow_html=True)
         st.write("")
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown('<div class="panel feature-card"><h3>🖌️ Student artists</h3><p>Register with your site and age category. An administrator will upload your artwork.</p></div>', unsafe_allow_html=True)
+            st.markdown('<div class="panel feature-card"><h3>🖌️ Student artists</h3><p>No student account is required. An administrator records your details and uploads your artwork.</p></div>', unsafe_allow_html=True)
         with c2:
             st.markdown('<div class="panel feature-card"><h3>🛡️ Administrators</h3><p>Upload student artwork PDFs by site and age category and manage competition access.</p></div>', unsafe_allow_html=True)
         with c3:
@@ -416,7 +416,7 @@ if not user:
             with st.form("signin_form"):
                 identifier = st.text_input("Username or Vidullanka email")
                 password = st.text_input("Password / Student code", type="password")
-                st.caption("Students: enter your generated student code. Staff: enter your account password.")
+                st.caption("Staff: enter your account password.")
                 submit = st.form_submit_button("Sign in", type="primary", use_container_width=True)
                 if submit:
                     found = authenticate(identifier, password)
@@ -430,51 +430,29 @@ if not user:
             st.markdown('<div class="panel"><h3>One platform, four roles</h3><p>Students · Teachers · Admin</p><p class="small-muted">Administrator accounts are provisioned by Vidullanka. Teachers can register using their email address.</p></div>', unsafe_allow_html=True)
 
     elif st.session_state.page == "Create account":
-        st.markdown('<div class="panel"><h2>Create your account</h2><p class="small-muted">Choose the account type that matches your role.</p></div>', unsafe_allow_html=True)
-        role_tab_student, role_tab_teacher = st.tabs(["🎨 Student", "👩‍🏫 Teacher"])
-        with role_tab_student:
-            with st.form("student_register"):
-                name = st.text_input("Student's full name")
-                father = st.text_input("Father's name")
-                age = st.selectbox("Age category", AGE_CATEGORIES)
-                site = st.selectbox("Site", SITES)
-                username = st.text_input("Create username")
-                ok = st.form_submit_button("Create student account", type="primary", use_container_width=True)
-                if ok:
-                    if not all([name.strip(), father.strip(), username.strip()]):
-                        st.error("Complete all fields.")
-                    else:
-                        try:
-                            student_code = create_student(name, father, age, site, username)
-                            st.success("Student account created successfully.")
-                            st.info("Keep this student code safe. You will need it to sign in.")
-                            st.code(student_code)
-                        except IntegrityError:
-                            st.error("That username is already taken. Please choose another.")
-                        except Exception as e:
-                            st.error(f"Could not create account: {e}")
-        with role_tab_teacher:
-            with st.form("teacher_register"):
-                name = st.text_input("Teacher's name")
-                email = st.text_input("Email", key="teacher_email", placeholder="Enter your email address")
-                pw = st.text_input("Create password", type="password", key="teacher_pw")
-                pw2 = st.text_input("Confirm password", type="password", key="teacher_pw2")
-                ok = st.form_submit_button("Create teacher account", type="primary", use_container_width=True)
-                if ok:
-                    if not email.strip() or not pw or not name.strip():
-                        st.error("Complete all fields.")
-                    elif len(pw) < 8:
-                        st.error("Password must be at least 8 characters.")
-                    elif pw != pw2:
-                        st.error("Passwords do not match.")
-                    else:
-                        try:
-                            create_staff("teacher", email, pw, name)
-                            st.success("Teacher account created. Sign in using your email address.")
-                        except IntegrityError:
-                            st.error("An account already exists for this email.")
-                        except ValueError as e:
-                            st.error(str(e))
+        st.markdown('<div class="panel"><h2>Create your account</h2><p class="small-muted">Teachers can create an account here. Students do not need accounts.</p></div>', unsafe_allow_html=True)
+        st.subheader("👩‍🏫 Teacher account")
+        with st.form("teacher_register"):
+            name = st.text_input("Teacher's name")
+            email = st.text_input("Email", key="teacher_email", placeholder="Enter your email address")
+            pw = st.text_input("Create password", type="password", key="teacher_pw")
+            pw2 = st.text_input("Confirm password", type="password", key="teacher_pw2")
+            ok = st.form_submit_button("Create teacher account", type="primary", use_container_width=True)
+            if ok:
+                if not email.strip() or not pw or not name.strip():
+                    st.error("Complete all fields.")
+                elif len(pw) < 8:
+                    st.error("Password must be at least 8 characters.")
+                elif pw != pw2:
+                    st.error("Passwords do not match.")
+                else:
+                    try:
+                        create_staff("teacher", email, pw, name)
+                        st.success("Teacher account created. Sign in using your email address.")
+                    except IntegrityError:
+                        st.error("An account already exists for this email.")
+                    except ValueError as e:
+                        st.error(str(e))
         st.info(
             "Administrator accounts are provided by Vidullanka. "
             "Use one of the authorized admin email addresses and the initial password "
@@ -636,66 +614,104 @@ else:
         with upload_col2:
             upload_age = st.selectbox("Select age category", AGE_CATEGORIES, key="admin_upload_age")
 
-        eligible_students = query_all("""
-            SELECT id, full_name, father_name, username, site, age_category
-            FROM users
-            WHERE role='student' AND site=:site AND age_category=:age
-            ORDER BY full_name
-        """, {"site": upload_site, "age": upload_age})
+        student_name = st.text_input("Student's full name", key="admin_student_name")
+        father_name = st.text_input("Father's name", key="admin_father_name")
 
-        if not eligible_students:
-            st.info("No students are registered under this site and age category.")
-        else:
-            student_options = {
-                f"{student['full_name']} — {student['username']}": student["id"]
-                for student in eligible_students
-            }
-            selected_student_label = st.selectbox(
-                "Select student", list(student_options.keys()), key="admin_upload_student"
-            )
-            selected_student_id = student_options[selected_student_label]
-            selected_student = next(
-                student for student in eligible_students
-                if student["id"] == selected_student_id
-            )
-            st.caption(
-                f"Father's name: {selected_student['father_name'] or '—'} · "
-                f"Site: {selected_student['site']} · "
-                f"Age category: {selected_student['age_category']}"
-            )
+        existing_student = None
+        if student_name.strip() and father_name.strip():
+            existing_student = query_one("""
+                SELECT id, full_name, father_name, site, age_category
+                FROM users
+                WHERE role='student'
+                  AND lower(trim(full_name))=lower(trim(:name))
+                  AND lower(trim(coalesce(father_name, '')))=lower(trim(:father))
+                  AND site=:site AND age_category=:age
+                ORDER BY id
+                LIMIT 1
+            """, {
+                "name": student_name,
+                "father": father_name,
+                "site": upload_site,
+                "age": upload_age,
+            })
+
+        if existing_student:
             current_artwork = query_one(
                 "SELECT id, file_name, pdf_data FROM artworks WHERE student_id=:id",
-                {"id": selected_student_id},
+                {"id": existing_student["id"]},
             )
             if current_artwork:
-                st.info(f"An artwork is already uploaded: {current_artwork['file_name']}. Uploading a new PDF will replace it.")
+                st.info(
+                    f"An artwork is already uploaded for this student: "
+                    f"{current_artwork['file_name']}. Uploading a new PDF will replace it."
+                )
                 st.download_button(
                     "Download current artwork PDF",
                     data=bytes(current_artwork["pdf_data"]),
                     file_name=current_artwork["file_name"],
                     mime="application/pdf",
-                    key=f"admin_current_pdf_{selected_student_id}",
+                    key=f"admin_current_pdf_{existing_student['id']}",
                 )
 
-            with st.form(f"admin_artwork_upload_{selected_student_id}"):
-                uploaded_artwork = st.file_uploader(
-                    "Choose student's artwork (PDF only)",
-                    type=["pdf"],
-                    key=f"admin_pdf_{selected_student_id}",
-                )
-                upload_submit = st.form_submit_button(
-                    "Upload / replace artwork", type="primary", use_container_width=True
-                )
-                if upload_submit:
-                    if not uploaded_artwork:
-                        st.error("Choose a PDF file first.")
-                    elif not uploaded_artwork.getvalue().startswith(b"%PDF"):
-                        st.error("The uploaded file does not appear to be a valid PDF.")
-                    elif len(uploaded_artwork.getvalue()) > 15 * 1024 * 1024:
-                        st.error("PDF must be 15 MB or smaller.")
-                    else:
-                        try:
-                            execute("""
+        with st.form("admin_artwork_upload_form"):
+            uploaded_artwork = st.file_uploader(
+                "Choose student's artwork (PDF only)",
+                type=["pdf"],
+                key="admin_pdf_upload",
+            )
+            upload_submit = st.form_submit_button(
+                "Upload / replace artwork", type="primary", use_container_width=True
+            )
+
+            if upload_submit:
+                if not student_name.strip() or not father_name.strip():
+                    st.error("Enter the student's full name and father's name.")
+                elif not uploaded_artwork:
+                    st.error("Choose a PDF file first.")
+                elif not uploaded_artwork.getvalue().startswith(b"%PDF"):
+                    st.error("The uploaded file does not appear to be a valid PDF.")
+                elif len(uploaded_artwork.getvalue()) > 15 * 1024 * 1024:
+                    st.error("PDF must be 15 MB or smaller.")
+                else:
+                    try:
+                        with db_engine().begin() as conn:
+                            student_record = conn.execute(text("""
+                                SELECT id, full_name
+                                FROM users
+                                WHERE role='student'
+                                  AND lower(trim(full_name))=lower(trim(:name))
+                                  AND lower(trim(coalesce(father_name, '')))=lower(trim(:father))
+                                  AND site=:site AND age_category=:age
+                                ORDER BY id
+                                LIMIT 1
+                            """), {
+                                "name": student_name.strip(),
+                                "father": father_name.strip(),
+                                "site": upload_site,
+                                "age": upload_age,
+                            }).mappings().first()
+
+                            if student_record:
+                                student_id = student_record["id"]
+                                saved_student_name = student_record["full_name"]
+                            else:
+                                result = conn.execute(text("""
+                                    INSERT INTO users
+                                        (role, password_hash, full_name, father_name, age_category, site)
+                                    VALUES
+                                        ('student', :password_hash, :full_name, :father_name, :age_category, :site)
+                                    RETURNING id, full_name
+                                """), {
+                                    "password_hash": hash_password(secrets.token_urlsafe(32)),
+                                    "full_name": student_name.strip(),
+                                    "father_name": father_name.strip(),
+                                    "age_category": upload_age,
+                                    "site": upload_site,
+                                }).mappings().one()
+                                student_id = result["id"]
+                                saved_student_name = result["full_name"]
+
+                            conn.execute(text("""
                                 INSERT INTO artworks
                                     (student_id, uploaded_by, file_name, mime_type, pdf_data)
                                 VALUES
@@ -706,18 +722,20 @@ else:
                                     mime_type=EXCLUDED.mime_type,
                                     pdf_data=EXCLUDED.pdf_data,
                                     uploaded_at=CURRENT_TIMESTAMP
-                            """, {
-                                "student_id": selected_student_id,
+                            """), {
+                                "student_id": student_id,
                                 "uploaded_by": user["id"],
                                 "file_name": uploaded_artwork.name,
                                 "pdf_data": uploaded_artwork.getvalue(),
                             })
-                            st.success(
-                                f"Artwork uploaded successfully for {selected_student['full_name']}."
-                            )
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Artwork upload failed: {e}")
+
+                        st.success(
+                            f"Artwork uploaded successfully for {saved_student_name} "
+                            f"({upload_site} · {upload_age})."
+                        )
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Artwork upload failed: {e}")
 
         st.subheader("Artwork and marking overview")
         st.metric("Artwork PDFs uploaded", query_one("SELECT COUNT(*) AS n FROM artworks")["n"])
