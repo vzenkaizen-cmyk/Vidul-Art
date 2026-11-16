@@ -614,8 +614,20 @@ else:
         with upload_col2:
             upload_age = st.selectbox("Select age category", AGE_CATEGORIES, key="admin_upload_age")
 
-        student_name = st.text_input("Student's full name", key="admin_student_name")
-        father_name = st.text_input("Father's name", key="admin_father_name")
+        # Change widget keys after each successful upload so the next entry
+        # starts with empty student details and an empty PDF uploader.
+        if "admin_upload_form_version" not in st.session_state:
+            st.session_state.admin_upload_form_version = 0
+        upload_form_version = st.session_state.admin_upload_form_version
+
+        student_name = st.text_input(
+            "Student's full name",
+            key=f"admin_student_name_{upload_form_version}"
+        )
+        father_name = st.text_input(
+            "Father's name",
+            key=f"admin_father_name_{upload_form_version}"
+        )
 
         existing_student = None
         if student_name.strip() and father_name.strip():
@@ -653,11 +665,11 @@ else:
                     key=f"admin_current_pdf_{existing_student['id']}",
                 )
 
-        with st.form("admin_artwork_upload_form"):
+        with st.form(f"admin_artwork_upload_form_{upload_form_version}"):
             uploaded_artwork = st.file_uploader(
                 "Choose student's artwork (PDF only)",
                 type=["pdf"],
-                key="admin_pdf_upload",
+                key=f"admin_pdf_upload_{upload_form_version}",
             )
             upload_submit = st.form_submit_button(
                 "Upload / replace artwork", type="primary", use_container_width=True
@@ -736,9 +748,69 @@ else:
                             f"Artwork uploaded successfully for {saved_student_name} "
                             f"({upload_site} · {upload_age})."
                         )
+                        # Reset the entry fields and file uploader for the next student.
+                        st.session_state.admin_upload_form_version += 1
                         st.rerun()
                     except Exception as e:
                         st.error(f"Artwork upload failed: {e}")
+
+        st.divider()
+        st.subheader("🔎 Check uploaded artworks by site and age category")
+        review_col1, review_col2 = st.columns(2)
+        with review_col1:
+            review_site = st.selectbox(
+                "Select site to review",
+                SITES,
+                key="admin_review_site"
+            )
+        with review_col2:
+            review_age = st.selectbox(
+                "Select age category to review",
+                AGE_CATEGORIES,
+                key="admin_review_age"
+            )
+
+        reviewed_artworks = query_all("""
+            SELECT a.id AS artwork_id, a.file_name, a.uploaded_at,
+                   u.full_name, u.father_name, u.site, u.age_category
+            FROM artworks a
+            JOIN users u ON u.id = a.student_id
+            WHERE u.site = :site AND u.age_category = :age
+            ORDER BY u.full_name
+        """, {"site": review_site, "age": review_age})
+
+        st.metric(
+            f"Artworks uploaded — {review_site} · {review_age}",
+            len(reviewed_artworks)
+        )
+        if not reviewed_artworks:
+            st.info("No artworks have been uploaded for this site and age category yet.")
+        else:
+            for artwork in reviewed_artworks:
+                with st.expander(
+                    f"{artwork['full_name']} · {artwork['father_name'] or 'Father name not provided'}"
+                ):
+                    st.write(f"**Student:** {artwork['full_name']}")
+                    st.write(f"**Father's name:** {artwork['father_name'] or '—'}")
+                    st.write(f"**Site:** {artwork['site']}")
+                    st.write(f"**Age category:** {artwork['age_category']}")
+                    st.write(f"**File:** {artwork['file_name']}")
+                    st.caption(
+                        f"Uploaded: {artwork['uploaded_at'].strftime('%Y-%m-%d %H:%M') if artwork['uploaded_at'] else '—'}"
+                    )
+                    # Fetch the PDF only when an admin opens its entry.
+                    artwork_pdf = query_one(
+                        "SELECT pdf_data FROM artworks WHERE id=:id",
+                        {"id": artwork["artwork_id"]}
+                    )
+                    if artwork_pdf:
+                        st.download_button(
+                            "Download artwork PDF",
+                            data=bytes(artwork_pdf["pdf_data"]),
+                            file_name=artwork["file_name"],
+                            mime="application/pdf",
+                            key=f"admin_review_pdf_{artwork['artwork_id']}"
+                        )
 
         st.subheader("Artwork and marking overview")
         st.metric("Artwork PDFs uploaded", query_one("SELECT COUNT(*) AS n FROM artworks")["n"])
