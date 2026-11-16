@@ -257,8 +257,9 @@ def inject_css():
       align-items: stretch;
     }}
     .block-container:has(.hero) .feature-card {{
-      min-height: 0;
-      height: clamp(145px, 23vh, 205px);
+      min-height: 205px;
+      height: auto;
+      box-sizing: border-box;
     }}
     @media (max-width: 700px) {{
       .block-container:has(.hero) {{
@@ -271,7 +272,7 @@ def inject_css():
       }}
       .block-container:has(.hero) .feature-card {{
         height: auto;
-        min-height: 150px;
+        min-height: 185px;
       }}
     }}
 
