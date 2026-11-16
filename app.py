@@ -697,11 +697,14 @@ else:
                             else:
                                 result = conn.execute(text("""
                                     INSERT INTO users
-                                        (role, password_hash, full_name, father_name, age_category, site)
+                                        (role, username, password_hash, full_name, father_name, age_category, site)
                                     VALUES
-                                        ('student', :password_hash, :full_name, :father_name, :age_category, :site)
+                                        ('student', :username, :password_hash, :full_name, :father_name, :age_category, :site)
                                     RETURNING id, full_name
                                 """), {
+                                    # Students do not sign in; this unique internal value
+                                    # satisfies the existing database username constraint.
+                                    "username": f"student_{secrets.token_hex(12)}",
                                     "password_hash": hash_password(secrets.token_urlsafe(32)),
                                     "full_name": student_name.strip(),
                                     "father_name": father_name.strip(),
