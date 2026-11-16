@@ -237,6 +237,44 @@ def inject_css():
     }}
     [data-testid="stHeader"] {{ background: transparent; }}
     .block-container {{ padding-top: 1.4rem; padding-bottom: 3rem; max-width: 1250px; }}
+
+    /* Keep the Welcome page within the visible desktop browser area. */
+    .block-container:has(.hero) {{
+      box-sizing: border-box;
+      height: calc(100vh - 4.5rem);
+      min-height: 0;
+      padding-top: .65rem;
+      padding-bottom: .65rem;
+      overflow: hidden;
+    }}
+    .block-container:has(.hero) .hero {{
+      height: clamp(260px, 44vh, 390px);
+      min-height: 0;
+      box-sizing: border-box;
+      padding: clamp(24px, 4vh, 48px) 5%;
+    }}
+    .block-container:has(.hero) [data-testid="stHorizontalBlock"] {{
+      align-items: stretch;
+    }}
+    .block-container:has(.hero) .feature-card {{
+      min-height: 0;
+      height: clamp(145px, 23vh, 205px);
+    }}
+    @media (max-width: 700px) {{
+      .block-container:has(.hero) {{
+        height: auto;
+        overflow: visible;
+      }}
+      .block-container:has(.hero) .hero {{
+        height: auto;
+        min-height: 280px;
+      }}
+      .block-container:has(.hero) .feature-card {{
+        height: auto;
+        min-height: 150px;
+      }}
+    }}
+
     .hero {{
       min-height: 470px; border-radius: 28px; overflow: hidden; padding: 54px 5%;
       display:flex; flex-direction:column; justify-content:center; color:#123047;
